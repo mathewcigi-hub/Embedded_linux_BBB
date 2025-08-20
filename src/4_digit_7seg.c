@@ -1,566 +1,163 @@
 /*
- ============================================================================
- Name        : 4_digit_7seg.c
- Author      : Kiran N < niekiran@gmail.com >
- Version     : 1.0
- Copyright   : Your copyright notice
- Description : This application implements a 4 digit up/down/random counter on 4 dgit 7seg LED display
- TODOs for the students
- 1)Convert this application to implement Digital clock. 
- ============================================================================
- */
+ =============================================================================
+ File        : digital_clock.c
+ Author      : Modified version (based on original by Kiran N)
+ Version     : 2.0
+ Description : Digital counter/clock for 4-digit 7-seg LED using BeagleBone GPIO
+ =============================================================================
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <poll.h>
-#include<stdint.h>
+#include <stdint.h>
 #include <time.h>
-#include <math.h>
 
-/*==========================================================================================
-BBB_expansion_header_P8_pins           GPIO number            4-digit 7seg Display pin number
-=============================================================================================
-P8.7                                   GPIO_66                     11   (SEG A)
-P8.8                                   GPIO_67                     7    (SEG B)
-P8.9                                   GPIO_69                     4	(SEG C)
-P8.10                                  GPIO_68                     3	(DP)
-P8.11                                  GPIO_45                     2	(SEG D)
-P8.12                                  GPIO_44                     1	(SEG E)
-P8.14                                  GPIO_26                     10	(SEG F)
-P8.16                                  GPIO_46                     5	(SEG G)
-============================================================================================ */
+#define SYSFS_GPIO_PATH "/sys/class/gpio"
+#define BUFFER_SIZE     64
 
+/* Segment GPIOs */
+#define SEG_A   66
+#define SEG_B   67
+#define SEG_C   69
+#define SEG_D   45
+#define SEG_E   44
+#define SEG_F   26
+#define SEG_G   46
+#define SEG_DP  68
 
-/*==========================================================================================
-BBB_expansion_header_P9_pins           GPIO number            4-digit 7seg Dispaly pin number
-=============================================================================================
-P9.15                                   GPIO_48                     12   (DIGIT 1 )
-P9.23                                   GPIO_49                      9	 (DIGIT 2 )
-P9.30                                   GPIO_112                     8	 (DIGIT 3 )
-P9.27                                   GPIO_115                     6	 (DIGIT 4 )
-============================================================================================= */
+/* Digit GPIOs */
+#define DIG_1   48
+#define DIG_2   49
+#define DIG_3   112
+#define DIG_4   115
 
-/* un comment this macro only if you use COMMAN CATHODE display */
-//#define COMMON_CATHODE
-
-#define GPIO_66     66
-#define GPIO_67     67
-#define GPIO_69     69
-#define GPIO_68     68
-#define GPIO_45     45
-#define GPIO_44     44
-#define GPIO_26     26
-#define GPIO_46     46
-
-#define GPIO_48     48
-#define GPIO_49     49
-#define GPIO_112    112
-#define GPIO_115    115
-
- 
-#define GPIO_66_P8_7_SEGA       GPIO_66       /*  display pin 11    */
-#define GPIO_67_P8_8_SEGB       GPIO_67       /*  display pin 7     */
-#define GPIO_69_P8_9_SEGC       GPIO_69       /*  display pin 4     */
-#define GPIO_68_P8_10_DP        GPIO_68       /*  display pin 3     */
-#define GPIO_45_P8_11_SEGD      GPIO_45       /*  display pin 2     */
-#define GPIO_44_P8_12_SEGE      GPIO_44       /*  display pin 1     */
-#define GPIO_26_P8_14_SEGF      GPIO_26       /*  display pin 10    */
-#define GPIO_46_P8_16_SEGG      GPIO_46       /*  display pin 5     */
-
-#define GPIO_48_P9_15_DIGIT1     GPIO_48       /*  display pin 12    */
-#define GPIO_49_P9_23_DIGIT2     GPIO_49       /*  display pin 9     */
-#define GPIO_117_P9_30_DIGIT3    GPIO_112      /*  display pin 8     */
-#define GPIO_115_P9_27_DIGIT4    GPIO_115      /*  display pin 6     */ 
-
-
-
-#define HIGH_VALUE          1
-#define LOW_VALUE           0
-
-#define GPIO_DIR_OUT        HIGH_VALUE
-#define GPIO_DIR_IN         LOW_VALUE
-
-#define GPIO_LOW_VALUE      LOW_VALUE
-#define GPIO_HIGH_VALUE     HIGH_VALUE
-
+/* Common Anode / Cathode configuration */
 #ifdef COMMON_CATHODE
-	#define SEGMENT_ON          HIGH_VALUE
-	#define SEGMENT_OFF         LOW_VALUE
+    #define SEG_ON   1
+    #define SEG_OFF  0
 #else
-	#define SEGMENT_ON          LOW_VALUE
-	#define SEGMENT_OFF         HIGH_VALUE
+    #define SEG_ON   0
+    #define SEG_OFF  1
 #endif
 
-
-/* This is the path corresponds to GPIOs in the 'sys' directory */
-#define SYS_GPIO_PATH       "/sys/class/gpio"
-
-#define SOME_BYTES          100
-
-
-/*
- *  GPIO export pin
- *
- */
-int gpio_export(uint32_t gpio_num)
-{
-	int fd, len;
-	char buf[SOME_BYTES];
-
-	fd = open(SYS_GPIO_PATH "/export", O_WRONLY);
-	if (fd < 0) {
-		perror(" error opening export file\n");
-		return fd;
-	}
-
-	len = snprintf(buf, sizeof(buf), "%d", gpio_num);
-	write(fd, buf, len);
-	close(fd);
-
-	return 0;
-}
-
-/*
- *  GPIO configure direction
- *  dir_value : 1 means 'out' , 0 means "in"
- */
-int gpio_configure_dir(uint32_t gpio_num, uint8_t dir_value)
-{
-    int fd;
-    char buf[SOME_BYTES];
-
-    snprintf(buf, sizeof(buf), SYS_GPIO_PATH "/gpio%d/direction", gpio_num);
-
-    fd = open(buf, O_WRONLY);
-    if (fd < 0) {
-        perror("gpio direction configure\n");
-        return fd;
-    }
-
-    if (dir_value)
-        write(fd, "out", 4); //3+1  +1 for NULL character 
-    else
-        write(fd, "in", 3);
-
+/* Helper: Export GPIO */
+static int gpio_export(int pin) {
+    int fd = open(SYSFS_GPIO_PATH "/export", O_WRONLY);
+    if (fd < 0) return -1;
+    char buf[BUFFER_SIZE];
+    int len = snprintf(buf, sizeof(buf), "%d", pin);
+    write(fd, buf, len);
     close(fd);
     return 0;
 }
 
-/*
- *  GPIO write value
- *  out_value : can be either 0 or 1
- */
-int gpio_write_value(uint32_t gpio_num, uint8_t out_value)
-{
-    int fd;
-    char buf[SOME_BYTES];
-
-    snprintf(buf, sizeof(buf), SYS_GPIO_PATH "/gpio%d/value", gpio_num);
-
-    fd = open(buf, O_WRONLY);
-    if (fd < 0) {
-        perror("gpio write value\n");
-        return fd;
-    }
-
-    if (out_value)
-        write(fd, "1", 2);
-    else
-        write(fd, "0", 2);
-
+/* Helper: Set direction */
+static int gpio_set_dir(int pin, int output) {
+    char path[BUFFER_SIZE];
+    snprintf(path, sizeof(path), SYSFS_GPIO_PATH "/gpio%d/direction", pin);
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) return -1;
+    if (output) write(fd, "out", 3);
+    else write(fd, "in", 2);
     close(fd);
     return 0;
 }
 
-/*
- *  GPIO read value
- */
-int gpio_read_value(uint32_t gpio_num)
-{
-    int fd;
-    uint8_t read_value=0;
-    char buf[SOME_BYTES];
-
-    snprintf(buf, sizeof(buf), SYS_GPIO_PATH "/gpio%d/value", gpio_num);
-
-    fd = open(buf, O_WRONLY);
-    if (fd < 0) {
-        perror("gpio read value\n");
-        return fd;
-    }
-
-    read(fd, &read_value, 1);
-
-    close(fd);
-    return read_value;
-}
-
-
-/*
- *  GPIO configure the edge of trigger
- *  edge : rising, falling
- */
-int gpio_configure_edge(uint32_t gpio_num, char *edge)
-{
-    int fd;
-    char buf[SOME_BYTES];
-
-    snprintf(buf, sizeof(buf), SYS_GPIO_PATH "/gpio%d/edge", gpio_num);
-
-    fd = open(buf, O_WRONLY);
-    if (fd < 0) {
-        perror("gpio configure edge\n");
-        return fd;
-    }
-
-    write(fd, edge, strlen(edge) + 1);
+/* Helper: Write value */
+static int gpio_write(int pin, int value) {
+    char path[BUFFER_SIZE];
+    snprintf(path, sizeof(path), SYSFS_GPIO_PATH "/gpio%d/value", pin);
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) return -1;
+    if (value) write(fd, "1", 1);
+    else write(fd, "0", 1);
     close(fd);
     return 0;
 }
 
-/*
- *  Open the sys fs file corresponding to gpio number
- */
-int gpio_file_open(uint32_t gpio_num)
-{
-    int fd;
-    char buf[SOME_BYTES];
+/* Segment pins in order A–G */
+static int segments[] = { SEG_A, SEG_B, SEG_C, SEG_D, SEG_E, SEG_F, SEG_G };
 
-    snprintf(buf, sizeof(buf), SYS_GPIO_PATH "/gpio%d/value", gpio_num);
+/* Digit select pins */
+static int digits[] = { DIG_1, DIG_2, DIG_3, DIG_4 };
 
-    fd = open(buf, O_RDONLY | O_NONBLOCK );
-    if (fd < 0) {
-        perror("gpio file open\n");
+/* Lookup table for numbers 0–9 */
+static int digit_map[10][7] = {
+    {1,1,1,1,1,1,0}, // 0
+    {0,1,1,0,0,0,0}, // 1
+    {1,1,0,1,1,0,1}, // 2
+    {1,1,1,1,0,0,1}, // 3
+    {0,1,1,0,0,1,1}, // 4
+    {1,0,1,1,0,1,1}, // 5
+    {1,0,1,1,1,1,1}, // 6
+    {1,1,1,0,0,0,0}, // 7
+    {1,1,1,1,1,1,1}, // 8
+    {1,1,1,1,0,1,1}  // 9
+};
+
+/* Initialize GPIO pins */
+static void setup_gpio() {
+    for (int i=0; i<7; i++) { gpio_export(segments[i]); gpio_set_dir(segments[i],1); }
+    gpio_export(SEG_DP); gpio_set_dir(SEG_DP,1);
+
+    for (int i=0; i<4; i++) { gpio_export(digits[i]); gpio_set_dir(digits[i],1); }
+}
+
+/* Display single digit */
+static void display_digit(int num) {
+    for (int i=0; i<7; i++) {
+        gpio_write(segments[i], digit_map[num][i] ? SEG_ON : SEG_OFF);
     }
-    return fd;
 }
 
-/*
- *  close a file
- */
-int gpio_file_close(int fd)
-{
-    return close(fd);
+/* Multiplex display across 4 digits */
+static void display_number(int value) {
+    for (int pos=3; pos>=0; pos--) {
+        int digit_val = value % 10;
+        value /= 10;
+
+        gpio_write(digits[pos], 1);          // turn on digit
+        display_digit(digit_val);            // show number
+        usleep(100);                         // persistence
+        display_digit(10);                   // clear
+        gpio_write(digits[pos], 0);          // turn off digit
+    }
 }
 
-/* This function displays number on the 7segment display */
-void Write_number_to_7segdisplay(uint8_t numberToDisplay)
-{
+/* Count up */
+static void run_upcounter(int delay) {
+    int count = 0;
+    while (1) {
+        for (int i=0; i<delay; i++) display_number(count);
+        count = (count+1) % 10000;
+    }
+}
 
-    switch (numberToDisplay){
+/* Count down */
+static void run_downcounter(int delay) {
+    int count = 9999;
+    while (1) {
+        for (int i=0; i<delay; i++) display_number(count);
+        count = (count==0) ? 9999 : count-1;
+    }
+}
 
-    case 0:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_ON);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_ON);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_ON);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_ON);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_ON);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_OFF);
-    break;
-
-    case 1:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_OFF);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_ON);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_OFF);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_OFF);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_OFF);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_OFF);
-    break;
-
-    case 2:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_ON);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_ON);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_OFF);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_ON);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_ON);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_OFF);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_ON);
-    break;
-
-    case 3:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_ON);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_ON);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_ON);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_OFF);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_OFF);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_ON);
-    break;
-
-    case 4:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_OFF);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_ON);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_OFF);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_OFF);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_ON);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_ON);
-    break;
-
-    case 5:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_ON);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_OFF);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_ON);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_OFF);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_ON);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_ON);
-    break;
-
-    case 6:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_ON);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_OFF);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_ON);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_ON);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_ON);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_ON);
-    break;
-
-    case 7:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_ON);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_ON);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_OFF);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_OFF);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_OFF);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_OFF);
-    break;
-
-    case 8:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_ON);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_ON);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_ON);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_ON);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_ON);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_ON);
-    break;
-
-    case 9:
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_ON);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_ON);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_ON);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_ON);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_OFF);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_ON);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_ON);
-    break;
-
-    case 10:
-    	/* This will turn off all segments */
-        gpio_write_value(GPIO_66_P8_7_SEGA, SEGMENT_OFF);
-        gpio_write_value(GPIO_67_P8_8_SEGB, SEGMENT_OFF);
-        gpio_write_value(GPIO_69_P8_9_SEGC, SEGMENT_OFF);
-        gpio_write_value(GPIO_45_P8_11_SEGD, SEGMENT_OFF);
-        gpio_write_value(GPIO_44_P8_12_SEGE, SEGMENT_OFF);
-        gpio_write_value(GPIO_26_P8_14_SEGF, SEGMENT_OFF);
-        gpio_write_value(GPIO_46_P8_16_SEGG, SEGMENT_OFF);
-    break;
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        printf("Usage: %s <mode> <delay>\n", argv[0]);
+        printf("Modes: up | down\n");
+        return 1;
     }
 
+    int delay = atoi(argv[2]);
+    setup_gpio();
 
+    if (strcmp(argv[1],"up")==0) run_upcounter(delay);
+    else if (strcmp(argv[1],"down")==0) run_downcounter(delay);
+    else printf("Invalid mode. Use up/down.\n");
 
-}
-
-/*
- * This function implements the logic to write numbers on the 4 digit LED display
- * we turn on and display a number on each digit for a very small amount of time that is 10 micro seconds,then we move to
- * next digit.
- * if u do this very fast enough , then it gives the illusion that , we are writing to all digits simultaneously
- */
-void dispaly_numbers(uint32_t number)
-{
-	/* we have 4 digits , so loop of 4 */
-    for(int digit = 4 ; digit > 0 ; digit--) 
-    {
-    	/*
-    	 * start with the 4th digit(right most )
-    	 * Turn on each digit for a small amount of time and display the number
-    	 * */
-        switch(digit) 
-        {
-            case 1:
-                gpio_write_value(GPIO_48_P9_15_DIGIT1,GPIO_HIGH_VALUE);
-              break;
-
-            case 2:
-                gpio_write_value(GPIO_49_P9_23_DIGIT2,GPIO_HIGH_VALUE);
-              break;
-            case 3:
-                gpio_write_value(GPIO_117_P9_30_DIGIT3,GPIO_HIGH_VALUE);
-              break;
-            case 4:
-                gpio_write_value(GPIO_115_P9_27_DIGIT4,GPIO_HIGH_VALUE);
-              break;
-        }
-
-        Write_number_to_7segdisplay(number % 10);
-        number /= 10;
-
-       /* display each digit only for 10 micro seconds */
-       usleep(10);
-
-       /* Turn of all segments */
-       Write_number_to_7segdisplay(10);
-
-        //Turn off all digits
-        gpio_write_value(GPIO_48_P9_15_DIGIT1, GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_49_P9_23_DIGIT2, GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_117_P9_30_DIGIT3, GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_115_P9_27_DIGIT4, GPIO_LOW_VALUE);
-
-
-    }
-
-
-
-}
-
-/*
- * this function down counts
- * 'delay_value' controls the speed of down counting (given by user through command line )
- */
-void start_downcounting(int delay_value)
-{
-	uint32_t i=0,number=9999;
-	printf("DOWN COUNTING.......\n");
-
-	while(1)
-	{
-		/*we dont increment the number to display until 'delay_value' */
-		for ( i =0 ; i < delay_value ; i++)
-		{
-			dispaly_numbers(number);
-		}
-		number--;
-	}
-
-
-}
-
-/*
- * this function up counts
- * 'delay_value' controls the speed of up counting (given by user through command line )
- */
-void start_upcounting(int delay_value)
-{
-	uint32_t i=0,number=0;
-	printf("UP COUNTING.......\n");
-
-	while(1)
-	{
-		/*we dont increment the number to display until 'delay_value' */
-		for ( i =0 ; i < delay_value ; i++)
-		{
-			dispaly_numbers(number);
-		}
-		number++;
-	}
-
-}
-
-void start_updowncounting(int delay_value)
-{ 
-    printf("/* DIY : Student has to implement this */\n");
-
-}
-
-void start_randomcounting(int delay_value)
-{
-     printf("/* DIY : Student has to implement this */\n");
-}
-
-int main(int argc, char *argv[])
- {
-    printf("4 digit 7seg LED up/down/random counter application\n");
-
-    if ( argc != 3 ) /* argc should be 3 for correct execution */
-    {
-
-        printf( "usage: %s <direction> <delay>\n", argv[0] );
-        printf( "valid direction : up, down, updown,random\n");
-        printf ("recommended delay range : 0  to 1000 \n");
-    }
-    else
-    {
-        int value = atoi(argv[2]);
-
-        /*first lets export all required gpios */
-        gpio_export(GPIO_66_P8_7_SEGA);
-        gpio_export(GPIO_67_P8_8_SEGB);
-        gpio_export(GPIO_69_P8_9_SEGC);
-        gpio_export(GPIO_68_P8_10_DP);
-        gpio_export(GPIO_45_P8_11_SEGD);
-        gpio_export(GPIO_44_P8_12_SEGE);
-        gpio_export(GPIO_26_P8_14_SEGF);
-        gpio_export(GPIO_46_P8_16_SEGG);
-
-        gpio_export(GPIO_48_P9_15_DIGIT1);
-        gpio_export(GPIO_49_P9_23_DIGIT2);
-        gpio_export(GPIO_117_P9_30_DIGIT3);
-        gpio_export(GPIO_115_P9_27_DIGIT4);
-
-        /*first configure the direction for segments */
-
-        gpio_configure_dir(GPIO_66_P8_7_SEGA,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_67_P8_8_SEGB,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_69_P8_9_SEGC,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_68_P8_10_DP,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_45_P8_11_SEGD,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_44_P8_12_SEGE,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_26_P8_14_SEGF,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_46_P8_16_SEGG,GPIO_DIR_OUT);
-
-        /*configure the direction for digit control */
-        gpio_configure_dir(GPIO_48_P9_15_DIGIT1,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_49_P9_23_DIGIT2,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_117_P9_30_DIGIT3,GPIO_DIR_OUT);
-        gpio_configure_dir(GPIO_115_P9_27_DIGIT4,GPIO_DIR_OUT);
-
-        /* make all segments low */
-        gpio_write_value(GPIO_66_P8_7_SEGA,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_67_P8_8_SEGB,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_69_P8_9_SEGC,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_68_P8_10_DP,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_45_P8_11_SEGD,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_44_P8_12_SEGE,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_26_P8_14_SEGF,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_46_P8_16_SEGG,GPIO_LOW_VALUE);
-
-        /*MAKE ALL DIGITS OFF */
-        gpio_write_value(GPIO_48_P9_15_DIGIT1,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_49_P9_23_DIGIT2,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_117_P9_30_DIGIT3,GPIO_LOW_VALUE);
-        gpio_write_value(GPIO_115_P9_27_DIGIT4,GPIO_LOW_VALUE);
-
-        /* argc is correct , lets check argv */
-        if (strcmp(argv[1], "up") == 0)
-        {
-            start_upcounting(value);
-        }
-        else if (strcmp(argv[1], "down") == 0)
-        {
-            start_downcounting(value);
-        }
-        else if (strcmp(argv[1], "updown") == 0)
-        {
-            start_updowncounting(value);
-        }
-        else if (strcmp(argv[1], "random") == 0)
-        {
-            start_randomcounting(value);
-        }
-        else /* default: */
-        {
-            printf("Invalid direction values\n");
-            printf( "valid direction values : up, down,updown,random\n");
-        }
-    }
+    return 0;
 }
