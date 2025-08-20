@@ -1,6 +1,6 @@
-# 2-Digit Counter on BeagleBone Black
+# 2-Digit 7-segment Counter on BeagleBone Black
 
-This project demonstrates how to implement a **4-digit 7-segment counter** on the **BeagleBone Black (BBB)**.  
+This project demonstrates how to implement a **2-digit 7-segment counter** on the **BeagleBone Black (BBB)**.  
 The counter can operate in **up**, **down**, or **random** counting modes.
 
 ---
