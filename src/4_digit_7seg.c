@@ -74,7 +74,7 @@ static int gpio_write(int pin, int value) {
 static int segments[] = { SEG_A, SEG_B, SEG_C, SEG_D, SEG_E, SEG_F, SEG_G };
 
 
-static int digits[] = { DIG_1, DIG_2, DIG_3, DIG_4 };
+static int digits[] = { DIG_1, DIG_2};
 
 
 static int digit_map[10][7] = {
@@ -107,15 +107,15 @@ static void display_digit(int num) {
 
 
 static void display_number(int value) {
-    for (int pos=3; pos>=0; pos--) {
+    for (int pos=1; pos>=0; pos--) {
         int digit_val = value % 10;
         value /= 10;
 
-        gpio_write(digits[pos], 1);          // turn on digit
-        display_digit(digit_val);            // show number
-        usleep(100);                         // persistence
-        display_digit(10);                   // clear
-        gpio_write(digits[pos], 0);          // turn off digit
+        gpio_write(digits[pos], 1);
+        display_digit(digit_val);
+        usleep(100);
+        display_digit(10);
+        gpio_write(digits[pos], 0);
     }
 }
 
@@ -124,7 +124,7 @@ static void run_upcounter(int delay) {
     int count = 0;
     while (1) {
         for (int i=0; i<delay; i++) display_number(count);
-        count = (count+1) % 10000;
+        count = (count+1) % 100; 
     }
 }
 
@@ -133,7 +133,7 @@ static void run_downcounter(int delay) {
     int count = 9999;
     while (1) {
         for (int i=0; i<delay; i++) display_number(count);
-        count = (count==0) ? 9999 : count-1;
+        count = (count==0) ? 99 : count-1;
     }
 }
 
