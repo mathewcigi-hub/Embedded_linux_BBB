@@ -1,11 +1,3 @@
-/*
- =============================================================================
- File        : digital_clock.c
- Author      : Modified version (based on original by Kiran N)
- Version     : 2.0
- Description : Digital counter/clock for 4-digit 7-seg LED using BeagleBone GPIO
- =============================================================================
-*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +10,7 @@
 #define SYSFS_GPIO_PATH "/sys/class/gpio"
 #define BUFFER_SIZE     64
 
-/* Segment GPIOs */
+
 #define SEG_A   66
 #define SEG_B   67
 #define SEG_C   69
@@ -28,13 +20,13 @@
 #define SEG_G   46
 #define SEG_DP  68
 
-/* Digit GPIOs */
+
 #define DIG_1   48
 #define DIG_2   49
 #define DIG_3   112
 #define DIG_4   115
 
-/* Common Anode / Cathode configuration */
+
 #ifdef COMMON_CATHODE
     #define SEG_ON   1
     #define SEG_OFF  0
@@ -43,7 +35,7 @@
     #define SEG_OFF  1
 #endif
 
-/* Helper: Export GPIO */
+
 static int gpio_export(int pin) {
     int fd = open(SYSFS_GPIO_PATH "/export", O_WRONLY);
     if (fd < 0) return -1;
@@ -54,7 +46,7 @@ static int gpio_export(int pin) {
     return 0;
 }
 
-/* Helper: Set direction */
+
 static int gpio_set_dir(int pin, int output) {
     char path[BUFFER_SIZE];
     snprintf(path, sizeof(path), SYSFS_GPIO_PATH "/gpio%d/direction", pin);
@@ -66,7 +58,7 @@ static int gpio_set_dir(int pin, int output) {
     return 0;
 }
 
-/* Helper: Write value */
+
 static int gpio_write(int pin, int value) {
     char path[BUFFER_SIZE];
     snprintf(path, sizeof(path), SYSFS_GPIO_PATH "/gpio%d/value", pin);
@@ -78,13 +70,13 @@ static int gpio_write(int pin, int value) {
     return 0;
 }
 
-/* Segment pins in order A–G */
+
 static int segments[] = { SEG_A, SEG_B, SEG_C, SEG_D, SEG_E, SEG_F, SEG_G };
 
-/* Digit select pins */
+
 static int digits[] = { DIG_1, DIG_2, DIG_3, DIG_4 };
 
-/* Lookup table for numbers 0–9 */
+
 static int digit_map[10][7] = {
     {1,1,1,1,1,1,0}, // 0
     {0,1,1,0,0,0,0}, // 1
@@ -98,7 +90,7 @@ static int digit_map[10][7] = {
     {1,1,1,1,0,1,1}  // 9
 };
 
-/* Initialize GPIO pins */
+
 static void setup_gpio() {
     for (int i=0; i<7; i++) { gpio_export(segments[i]); gpio_set_dir(segments[i],1); }
     gpio_export(SEG_DP); gpio_set_dir(SEG_DP,1);
@@ -106,14 +98,14 @@ static void setup_gpio() {
     for (int i=0; i<4; i++) { gpio_export(digits[i]); gpio_set_dir(digits[i],1); }
 }
 
-/* Display single digit */
+
 static void display_digit(int num) {
     for (int i=0; i<7; i++) {
         gpio_write(segments[i], digit_map[num][i] ? SEG_ON : SEG_OFF);
     }
 }
 
-/* Multiplex display across 4 digits */
+
 static void display_number(int value) {
     for (int pos=3; pos>=0; pos--) {
         int digit_val = value % 10;
