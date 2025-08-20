@@ -53,3 +53,19 @@ BBB
 └── Ssh Shells
 ```
 
+
+Drag and drop your generated binary file into:  
+`BBB → Sftp files → My home → Desktop`
+
+
+## 4. Running on BBB
+
+1. Connect BBB to PC via USB.
+2. Open **Tera Term** and login to BBB (`debian` account).
+3. Navigate to Desktop:
+   ```bash
+   cd ~/Desktop
+4. Run the binary:
+```ld
+   ./counter_7seg up 500
+```
