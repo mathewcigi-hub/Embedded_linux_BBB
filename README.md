@@ -66,6 +66,6 @@ Drag and drop your generated binary file into:
    ```bash
    cd ~/Desktop
 4. Run the binary:
-```ld
+   ```ld
    ./counter_7seg up 500
-```
+   ```
